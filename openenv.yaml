@@ -1,0 +1,128 @@
+name: CodeSecurityAuditEnv
+description: >
+  OpenEnv-compatible reinforcement learning environment for code security auditing.
+  Agents classify vulnerabilities, identify vulnerable lines, explain risks, and propose fixes.
+version: 1.0.0
+entrypoint:
+  type: fastapi
+  module: app.main
+  app: app
+api:
+  reset:
+    method: POST
+    path: /reset
+  step:
+    method: POST
+    path: /step
+  state:
+    method: GET
+    path: /state
+  health:
+    method: GET
+    path: /health
+deployment:
+  runtime: docker
+  image:
+    dockerfile: Dockerfile
+  host: 0.0.0.0
+  port_env: PORT
+  default_port: 7860
+  healthcheck_path: /health
+observation_model:
+  type: object
+  required:
+    - code
+    - language
+    - context
+    - task_id
+    - difficulty
+  properties:
+    code:
+      type: string
+    language:
+      type: string
+    context:
+      type: string
+    task_id:
+      type: string
+    difficulty:
+      type: string
+      enum: [easy, medium, hard]
+    history:
+      type: array
+      nullable: true
+      items:
+        type: object
+        properties:
+          action_type:
+            type: string
+          vulnerability_type:
+            type: string
+          line_number:
+            type: integer
+          explanation:
+            type: string
+          fix:
+            type: string
+          reward:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+action_model:
+  type: object
+  required:
+    - action_type
+    - vulnerability_type
+    - line_number
+    - explanation
+    - fix
+  properties:
+    action_type:
+      type: string
+      enum: [report_vulnerability, suggest_fix]
+    vulnerability_type:
+      type: string
+      enum:
+        - SQL Injection
+        - XSS
+        - Hardcoded Secret
+        - Improper Validation
+        - Weak Hashing
+        - Path Traversal
+        - Insecure Deserialization
+        - SSRF
+        - None
+    line_number:
+      type: integer
+      minimum: 1
+    explanation:
+      type: string
+    fix:
+      type: string
+reward:
+  range: [0.0, 1.0]
+  deterministic: true
+  shaping:
+    vulnerability_correct: 0.4
+    vulnerability_wrong: -0.3
+    line_exact: 0.2
+    line_off_by_one: 0.1
+    explanation_quality_max: 0.2
+    fix_quality_max: 0.2
+    irrelevant_penalty_min: -0.2
+tasks:
+  count: 6
+  difficulties: [easy, medium, hard]
+  categories:
+    - SQL Injection
+    - Hardcoded Secret
+    - Improper Validation
+    - Weak Hashing
+    - SSRF
+    - Insecure Deserialization
+reproducibility:
+  task_order: fixed
+  grading_randomness: none
+  notes:
+    - reset advances through tasks in deterministic sequence
+    - reward calculation is lexical and rule-based
