@@ -47,7 +47,7 @@ project/
 |   |-- models.py      # Pydantic schemas
 |   |-- tasks.py       # Deterministic task dataset
 |   |-- grader.py      # Deterministic reward grading
-|-- inference.py       # Baseline LLM agent loop (HF or Gemini)
+|-- inference.py       # Baseline LLM agent loop (OpenAI-compatible API or mock)
 |-- openenv.yaml       # OpenEnv metadata
 |-- requirements.txt
 |-- Dockerfile
@@ -240,7 +240,7 @@ pip install -r requirements.txt
 
 3. Configure environment variables:
 
-Copy `.env.example` to `.env` and set provider keys:
+Copy `.env.example` to `.env` and set API configuration:
 
 ```bash
 cp .env.example .env
@@ -248,18 +248,11 @@ cp .env.example .env
 
 Contents of `.env`:
 ```
-LLM_PROVIDER=gemini
+API_BASE_URL=https://api-inference.huggingface.co/v1
+MODEL_NAME=deepseek-ai/DeepSeek-R1:fastest
+HF_TOKEN=hf_your_token_here
+
 STRICT_MODE=0
-
-# For Hugging Face (LLM_PROVIDER=hf)
-HF_API_KEY=hf_your_token_here
-HF_MODEL=deepseek-ai/DeepSeek-R1:fastest
-HF_DEBUG_RESPONSE=0
-
-# For Gemini (LLM_PROVIDER=gemini)
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.0-flash
-GEMINI_DEBUG_RESPONSE=0
 ```
 
 4. Run API server:
@@ -276,6 +269,11 @@ python inference.py
 
 This loads `.env` automatically and prints per-task plus average `final_score`.
 
+Configuration behavior:
+
+- If `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` are all set, inference runs in API mode.
+- If any required variable is missing, inference automatically falls back to deterministic mock mode.
+
 Optional: run both modes for comparison:
 
 ```bash
@@ -283,13 +281,13 @@ $env:STRICT_MODE="0"; python inference.py
 $env:STRICT_MODE="1"; python inference.py
 ```
 
-Optional: override provider/model at runtime:
+Optional: override API/model at runtime:
 
 ```bash
-$env:LLM_PROVIDER="gemini"; $env:GEMINI_MODEL="gemini-2.0-flash"; python inference.py
+$env:API_BASE_URL="https://api-inference.huggingface.co/v1"; $env:MODEL_NAME="deepseek-ai/DeepSeek-R1:fastest"; $env:HF_TOKEN="hf_your_token_here"; python inference.py
 ```
 
-If using Hugging Face, ensure your token has permission to "Make calls to Inference Providers".
+If using Hugging Face router, ensure your token has permission to call inference providers.
 
 ## Future Work
 
@@ -330,7 +328,7 @@ This repository is compatible with Spaces Docker runtime:
 1. Push this project to a Hugging Face Space configured with `SDK: Docker`.
 2. Spaces will build `Dockerfile` automatically.
 3. The app binds to `$PORT` (default `7860`), which matches Spaces requirements.
-4. Use Space secrets for sensitive values (for example `HF_API_KEY` if baseline inference is used in Space).
+4. Use Space secrets for sensitive values (for example `HF_TOKEN` if baseline inference is used in Space).
 
 ## Reproducibility Notes
 
