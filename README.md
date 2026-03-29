@@ -56,7 +56,12 @@ project/
 ### Action Model (Typed)
 
 - `action_type: report_vulnerability | suggest_fix | no_vulnerability`
-- `vulnerability_type: SQL Injection | XSS | Hardcoded Secret | ... | None`
+- `vulnerability_type:`
+  `SQL Injection | XSS | Hardcoded Secret | Improper Validation | Weak Hashing |`
+  `Command Injection | Path Traversal | Broken Authentication | Missing Rate Limiting |`
+  `Sensitive Data Exposure | Insecure Debug Configuration | Insecure Deserialization |`
+  `SSRF | API Key Leakage | CORS Misconfiguration | OAuth Redirect Misvalidation |`
+  `Prompt Injection | AI Generated Insecure Code | None`
 - `vulnerability_label: str | None`
 - `line_number: int`
 - `explanation: str`
@@ -64,11 +69,11 @@ project/
 
 ## Tasks
 
-The dataset is deterministic and currently includes 8 Python security tasks across three difficulty levels:
+The dataset is deterministic and currently includes 12 Python security tasks across three difficulty levels:
 
 - Easy: SQL Injection, Hardcoded Secret
-- Medium: SSRF, Weak Hashing, CORS Misconfiguration
-- Hard: Insecure Deserialization, OAuth Redirect Misvalidation + API Key Leakage, Prompt Injection + AI-Generated Insecure Code
+- Medium: SSRF, Weak Hashing, CORS Misconfiguration, Command Injection, Path Traversal
+- Hard: Insecure Deserialization, OAuth Redirect Misvalidation + API Key Leakage, Prompt Injection + AI-Generated Insecure Code, Broken Authentication + Missing Rate Limiting, Sensitive Data Exposure + Insecure Debug Configuration
 
 Each task uses canonical `vulnerabilities[]` ground truth with:
 
@@ -79,6 +84,13 @@ Each task uses canonical `vulnerabilities[]` ground truth with:
 - `accepted_fixes` and optional aliases
 
 Some hard tasks contain multiple vulnerabilities in a single episode.
+
+Newly added real-world scenarios include:
+
+- Command execution via unsanitized input (`medium_command_injection_01`)
+- File-serving path traversal (`medium_path_traversal_01`)
+- Authentication abuse without retry controls (`hard_broken_auth_rate_limit_01`)
+- Secret logging with production debug enabled (`hard_sensitive_data_logging_01`)
 
 ## Reward Function
 
