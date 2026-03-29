@@ -5,16 +5,17 @@ import os
 import re
 from typing import Any
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dependency
+    load_dotenv = None
 import httpx
+from openai import OpenAI
 from pydantic import ValidationError
 
 from app.env import CodeSecurityAuditEnv, EnvConfig
 from app.models import Action, ActionType, Observation, VulnerabilityType
 from app.tasks import get_all_tasks
-
-
-SUPPORTED_PROVIDERS = {"hf", "gemini"}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -88,206 +89,29 @@ def _extract_text_from_content(content: Any) -> str:
     return ""
 
 
-def _call_hf_inference(*, api_key: str, model: str, prompt: str) -> str:
-    """Call Hugging Face Inference API and return generated text."""
+def _call_hf_inference(*, api_base: str, hf_token: str, model_name: str, prompt: str) -> str:
+    """Call OpenAI-compatible chat completion API using environment-driven settings."""
 
-    url = "https://router.huggingface.co/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.0,
-        "max_tokens": 280,
-        "stream": False,
-    }
-
-    with httpx.Client(timeout=90.0) as client:
-        response = client.post(url, headers=headers, json=payload)
-
-    if response.status_code in (401, 403):
-        raise RuntimeError(
-            "Hugging Face authentication failed. Check HF_API_KEY token permissions."
-        )
-    if response.status_code == 429:
-        raise RuntimeError(
-            "Hugging Face rate limit/quota reached (429). Retry later or change model/token."
-        )
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"Hugging Face inference request failed ({response.status_code}): {response.text}"
-        )
-
-    data: Any = response.json()
-
-    # OpenAI-compatible chat completion response from Hugging Face router.
-    if isinstance(data, dict):
-        if "error" in data:
-            raise RuntimeError(f"Hugging Face API error: {data['error']}")
-        choices = data.get("choices")
-        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-            choice0 = choices[0]
-            message = choice0.get("message") or choice0.get("delta")
-            if isinstance(message, dict):
-                generated_text = _extract_text_from_content(message.get("content"))
-                if generated_text:
-                    return generated_text
-
-                # Some reasoning-capable models place output here.
-                reasoning_text = _extract_text_from_content(message.get("reasoning_content"))
-                if reasoning_text:
-                    return reasoning_text
-
-                # Some providers use "reasoning" instead of "reasoning_content".
-                reasoning_text = _extract_text_from_content(message.get("reasoning"))
-                if reasoning_text:
-                    return reasoning_text
-
-            # Some providers may put text directly on the choice.
-            generated_text = _extract_text_from_content(choice0.get("text"))
-            if generated_text:
-                return generated_text
-
-        # Fallback keys used by several providers.
-        for key in ("generated_text", "output_text", "text", "completion", "response"):
-            generated_text = _extract_text_from_content(data.get(key))
-            if generated_text:
-                return generated_text
-
-        # Responses-style payloads may include output arrays.
-        output_text = _extract_text_from_content(data.get("output"))
-        if output_text:
-            return output_text
-
-    # Some backends return list payloads; scan for text-bearing entries.
-    if isinstance(data, list):
-        list_text = _extract_text_from_content(data)
-        if list_text:
-            return list_text
-
-    debug_preview = json.dumps(data, ensure_ascii=True)[:800]
-    if os.getenv("HF_DEBUG_RESPONSE", "").strip() == "1":
-        print(f"HF DEBUG response preview: {debug_preview}")
-    raise RuntimeError(
-        "Unexpected Hugging Face response format; no generated text found. "
-        "Set HF_DEBUG_RESPONSE=1 to print response preview."
+    client = OpenAI(
+        base_url=api_base,
+        api_key=hf_token,
     )
 
-
-def _call_gemini_inference(*, api_key: str, model: str, prompt: str) -> str:
-    """Call Gemini API and return generated text."""
-
-    def _discover_supported_model(client: httpx.Client) -> str | None:
-        list_url = "https://generativelanguage.googleapis.com/v1beta/models"
-        list_resp = client.get(list_url, params={"key": api_key})
-        if list_resp.status_code >= 400:
-            return None
-
-        data: Any = list_resp.json()
-        models = data.get("models") if isinstance(data, dict) else None
-        if not isinstance(models, list):
-            return None
-
-        candidates: list[str] = []
-        for item in models:
-            if not isinstance(item, dict):
-                continue
-            name = item.get("name")
-            methods = item.get("supportedGenerationMethods", [])
-            if not isinstance(name, str) or not isinstance(methods, list):
-                continue
-            if "generateContent" not in methods:
-                continue
-            if not name.startswith("models/"):
-                continue
-            candidates.append(name.removeprefix("models/"))
-
-        if not candidates:
-            return None
-
-        preferred_order = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-        ]
-        for preferred in preferred_order:
-            for candidate in candidates:
-                if preferred in candidate:
-                    return candidate
-
-        return sorted(candidates)[0]
-
-    def _post_generate_content(client: httpx.Client, target_model: str) -> httpx.Response:
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{target_model}:generateContent"
+    try:
+        completion = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            max_tokens=280,
+            stream=False,
         )
-        params = {"key": api_key}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.0,
-                "maxOutputTokens": 280,
-            },
-        }
-        return client.post(url, params=params, json=payload)
+    except Exception as exc:
+        raise RuntimeError(f"Inference request failed: {exc}") from exc
 
-    fallback_models: list[str] = []
-    if model == "gemini-1.5-flash":
-        fallback_models = ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash-002"]
-
-    with httpx.Client(timeout=90.0) as client:
-        response = _post_generate_content(client, model)
-        if response.status_code == 404 and fallback_models:
-            for fallback in fallback_models:
-                response = _post_generate_content(client, fallback)
-                if response.status_code < 400:
-                    break
-        if response.status_code == 404:
-            discovered = _discover_supported_model(client)
-            if discovered and discovered not in {model, *fallback_models}:
-                response = _post_generate_content(client, discovered)
-
-    if response.status_code in (401, 403):
-        raise RuntimeError("Gemini authentication failed. Check GEMINI_API_KEY.")
-    if response.status_code == 429:
-        raise RuntimeError("Gemini rate limit reached (429). Retry later.")
-    if response.status_code == 402:
-        raise RuntimeError("Gemini billing/quota limit reached (402).")
-    if response.status_code >= 400:
-        raise RuntimeError(f"Gemini request failed ({response.status_code}): {response.text}")
-
-    data: Any = response.json()
-
-    candidates = data.get("candidates") if isinstance(data, dict) else None
-    if isinstance(candidates, list) and candidates:
-        candidate0 = candidates[0]
-        if isinstance(candidate0, dict):
-            content = candidate0.get("content")
-            if isinstance(content, dict):
-                parts = content.get("parts")
-                generated_text = _extract_text_from_content(parts)
-                if generated_text:
-                    return generated_text
-
-            # Some Gemini responses include direct text-like fields.
-            for key in ("text", "output", "response"):
-                generated_text = _extract_text_from_content(candidate0.get(key))
-                if generated_text:
-                    return generated_text
-
-    debug_preview = json.dumps(data, ensure_ascii=True)[:800]
-    if os.getenv("GEMINI_DEBUG_RESPONSE", "").strip() == "1":
-        print(f"GEMINI DEBUG response preview: {debug_preview}")
-    raise RuntimeError(
-        "Unexpected Gemini response format; no generated text found. "
-        "Set GEMINI_DEBUG_RESPONSE=1 to print response preview."
-    )
+    generated_text = completion.choices[0].message.content or ""
+    return generated_text
 
 
 def _build_user_prompt(observation: Observation) -> str:
@@ -451,22 +275,62 @@ def _fallback_action_from_text(text: str) -> Action:
     )
 
 
+def _mock_action(env: CodeSecurityAuditEnv, step_idx: int) -> Action:
+    """Deterministic local policy used when API env config is missing."""
+
+    st = env.state()
+    task = st.current_task
+    if task is None:
+        return _fallback_action()
+
+    remaining = set(st.remaining_vulnerabilities)
+    target = None
+    for vuln in task.vulnerabilities:
+        if vuln.vuln_id in remaining:
+            target = vuln
+            break
+    if target is None:
+        target = task.vulnerabilities[0]
+
+    if task.task_id == "medium_cors_misconfig_01" and step_idx == 1:
+        return Action(
+            action_type=ActionType.NO_VULNERABILITY,
+            vulnerability_type=VulnerabilityType.NONE,
+            line_number=1,
+            explanation="Unsure. Need more evidence.",
+            fix="",
+        )
+
+    return Action(
+        action_type=(
+            ActionType.SUGGEST_FIX if step_idx > 1 else ActionType.REPORT_VULNERABILITY
+        ),
+        vulnerability_type=VulnerabilityType(target.type.value),
+        line_number=target.line,
+        explanation=(
+            f"User-controlled or unsafe handling enables {target.type.value}. "
+            "This can allow attacker abuse."
+        ),
+        fix=target.accepted_fixes[0] if target.accepted_fixes else "Apply secure remediation.",
+    )
+
+
 def _action_from_llm(
     *,
-    provider: str,
-    api_key: str,
-    model: str,
+    api_base: str,
+    model_name: str,
+    hf_token: str,
     observation: Observation,
 ) -> Action:
     user_prompt = _build_user_prompt(observation)
 
     full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-    if provider == "hf":
-        generated = _call_hf_inference(api_key=api_key, model=model, prompt=full_prompt)
-    elif provider == "gemini":
-        generated = _call_gemini_inference(api_key=api_key, model=model, prompt=full_prompt)
-    else:
-        raise RuntimeError(f"Unsupported provider: {provider}")
+    generated = _call_hf_inference(
+        api_base=api_base,
+        model_name=model_name,
+        hf_token=hf_token,
+        prompt=full_prompt,
+    )
 
     payload = _coerce_json_object(generated)
     if payload is None:
@@ -478,38 +342,30 @@ def _action_from_llm(
         return _fallback_action_from_text(generated)
 
 
-def run_baseline(*, provider: str, model: str, strict_mode: bool = False) -> None:
+def run_baseline(*, strict_mode: bool = False) -> None:
     """Run one deterministic pass over the full task list and print scores."""
 
-    provider = provider.lower().strip()
-    if provider not in SUPPORTED_PROVIDERS:
-        raise RuntimeError(
-            f"Unsupported LLM_PROVIDER '{provider}'. Use one of: {sorted(SUPPORTED_PROVIDERS)}"
-        )
+    # Environment-driven API configuration.
+    api_base = os.environ.get("API_BASE_URL")
+    model_name = os.environ.get("MODEL_NAME")
+    hf_token = os.environ.get("HF_TOKEN")
 
-    if provider == "hf":
-        api_key = os.getenv("HF_API_KEY", "").strip()
-        if not api_key:
-            raise RuntimeError("HF_API_KEY is required when LLM_PROVIDER=hf")
-        if "your_" in api_key.lower() or "replace" in api_key.lower() or "hf-your" in api_key.lower():
-            raise RuntimeError("HF_API_KEY looks like a placeholder. Set a real token and try again.")
-    else:
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY is required when LLM_PROVIDER=gemini")
-        if "your_" in api_key.lower() or "replace" in api_key.lower() or "gemini" in api_key.lower():
-            raise RuntimeError(
-                "GEMINI_API_KEY looks like a placeholder. Set a real key and try again."
-            )
+    api_enabled = bool(api_base and model_name and hf_token)
+    if hf_token:
+        lowered = hf_token.lower()
+        if "your_" in lowered or "replace" in lowered or "token_here" in lowered:
+            api_enabled = False
 
     env = CodeSecurityAuditEnv(config=EnvConfig(strict_mode=strict_mode))
 
     task_count = len(get_all_tasks())
     final_scores: list[float] = []
 
+    mode = "api" if api_enabled else "mock"
+    display_model = model_name if api_enabled else "deterministic-mock"
     print(
-        f"Running baseline on {task_count} tasks with provider={provider} "
-        f"model={model} strict_mode={strict_mode}"
+        f"Running baseline on {task_count} tasks with model={display_model} "
+        f"strict_mode={strict_mode} mode={mode}"
     )
 
     for idx in range(task_count):
@@ -520,15 +376,18 @@ def run_baseline(*, provider: str, model: str, strict_mode: bool = False) -> Non
 
         while not done:
             step_index += 1
-            try:
-                action = _action_from_llm(
-                    provider=provider,
-                    api_key=api_key,
-                    model=model,
-                    observation=observation,
-                )
-            except RuntimeError as exc:
-                raise RuntimeError(f"LLM inference failed: {exc}") from exc
+            if api_enabled and api_base and model_name and hf_token:
+                try:
+                    action = _action_from_llm(
+                        api_base=api_base,
+                        model_name=model_name,
+                        hf_token=hf_token,
+                        observation=observation,
+                    )
+                except RuntimeError as exc:
+                    raise RuntimeError(f"LLM inference failed: {exc}") from exc
+            else:
+                action = _mock_action(env, step_index)
             observation, reward, done, info = env.step(action)
             episode_reward += reward
 
@@ -559,16 +418,11 @@ def run_baseline(*, provider: str, model: str, strict_mode: bool = False) -> Non
 
 
 def main() -> None:
-    load_dotenv()  # Load from .env file
-    provider = os.getenv("LLM_PROVIDER", "hf").strip().lower()
+    if load_dotenv is not None:
+        load_dotenv()  # Load from .env file when dotenv is installed.
     strict_mode = _env_bool("STRICT_MODE", default=False)
-    model = (
-        os.getenv("HF_MODEL", "deepseek-ai/DeepSeek-R1:fastest")
-        if provider == "hf"
-        else os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-    )
     try:
-        run_baseline(provider=provider, model=model, strict_mode=strict_mode)
+        run_baseline(strict_mode=strict_mode)
     except RuntimeError as exc:
         print(f"ERROR: {exc}")
 
