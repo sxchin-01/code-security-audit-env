@@ -310,25 +310,38 @@ It is designed for:
 Build image:
 
 ```bash
-docker build -t code-security-audit-env .
+docker build -t code-security-env .
 ```
 
-Run container:
+Run in mock mode (no API variables):
 
 ```bash
-docker run --rm -p 7860:7860 code-security-audit-env
+docker run --rm code-security-env
 ```
 
-Open API locally at `http://localhost:7860`.
+This runs `python inference.py` in deterministic mock mode and prints per-task scores plus `Average final_score`.
+
+Run in API mode:
+
+```bash
+docker run --rm \
+  -e API_BASE_URL=https://api-inference.huggingface.co/v1 \
+  -e MODEL_NAME=deepseek-ai/DeepSeek-R1:fastest \
+  -e HF_TOKEN=your_token_here \
+  -e STRICT_MODE=0 \
+  code-security-env
+```
+
+No secrets are baked into the image; pass `HF_TOKEN` only at runtime.
 
 ### Hugging Face Spaces (Docker)
 
-This repository is compatible with Spaces Docker runtime:
+This repository is compatible with Spaces Docker runtime for batch-style benchmark runs:
 
 1. Push this project to a Hugging Face Space configured with `SDK: Docker`.
 2. Spaces will build `Dockerfile` automatically.
-3. The app binds to `$PORT` (default `7860`), which matches Spaces requirements.
-4. Use Space secrets for sensitive values (for example `HF_TOKEN` if baseline inference is used in Space).
+3. The container entrypoint executes `python inference.py`.
+4. Use Space secrets for sensitive values (for example `HF_TOKEN` for API mode).
 
 ## Reproducibility Notes
 
