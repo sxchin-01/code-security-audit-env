@@ -32,7 +32,9 @@ SYSTEM_PROMPT = (
     "{"
     "\"action_type\": \"report_vulnerability\" or \"suggest_fix\" or \"no_vulnerability\", "
     "\"vulnerability_type\": one of [\"SQL Injection\",\"XSS\",\"Hardcoded Secret\"," 
-    "\"Improper Validation\",\"Weak Hashing\",\"Path Traversal\"," 
+    "\"Improper Validation\",\"Weak Hashing\",\"Command Injection\",\"Path Traversal\"," 
+    "\"Broken Authentication\",\"Missing Rate Limiting\",\"Sensitive Data Exposure\","
+    "\"Insecure Debug Configuration\"," 
     "\"Insecure Deserialization\",\"SSRF\",\"API Key Leakage\","
     "\"CORS Misconfiguration\",\"OAuth Redirect Misvalidation\","
     "\"Prompt Injection\",\"AI Generated Insecure Code\",\"None\"], "
@@ -393,7 +395,24 @@ def _vulnerability_from_text(text: str) -> VulnerabilityType:
         ("input validation", VulnerabilityType.IMPROPER_VALIDATION),
         ("weak hashing", VulnerabilityType.WEAK_HASHING),
         ("md5", VulnerabilityType.WEAK_HASHING),
+        ("command injection", VulnerabilityType.COMMAND_INJECTION),
+        ("os command injection", VulnerabilityType.COMMAND_INJECTION),
+        ("shell injection", VulnerabilityType.COMMAND_INJECTION),
         ("path traversal", VulnerabilityType.PATH_TRAVERSAL),
+        ("directory traversal", VulnerabilityType.PATH_TRAVERSAL),
+        ("file traversal", VulnerabilityType.PATH_TRAVERSAL),
+        ("broken auth", VulnerabilityType.BROKEN_AUTHENTICATION),
+        ("authentication flaw", VulnerabilityType.BROKEN_AUTHENTICATION),
+        ("weak authentication", VulnerabilityType.BROKEN_AUTHENTICATION),
+        ("no rate limiting", VulnerabilityType.RATE_LIMITING),
+        ("missing rate limiting", VulnerabilityType.RATE_LIMITING),
+        ("brute force vulnerability", VulnerabilityType.RATE_LIMITING),
+        ("sensitive data exposure", VulnerabilityType.SENSITIVE_DATA_EXPOSURE),
+        ("data leak", VulnerabilityType.SENSITIVE_DATA_EXPOSURE),
+        ("logging secrets", VulnerabilityType.SENSITIVE_DATA_EXPOSURE),
+        ("insecure debug", VulnerabilityType.DEBUG_CONFIGURATION),
+        ("debug mode enabled", VulnerabilityType.DEBUG_CONFIGURATION),
+        ("debug=true in production", VulnerabilityType.DEBUG_CONFIGURATION),
         ("insecure deserialization", VulnerabilityType.INSECURE_DESERIALIZATION),
         ("pickle", VulnerabilityType.INSECURE_DESERIALIZATION),
         ("ssrf", VulnerabilityType.SSRF),
