@@ -10,14 +10,32 @@ pinned: false
 
 # CodeSecurityAuditEnv
 
-CodeSecurityAuditEnv is an OpenEnv-compatible reinforcement learning environment for code security auditing. Each episode provides a vulnerable code snippet and expects the agent to:
+CodeSecurityAuditEnv is an OpenEnv-compatible reinforcement learning environment for evaluating LLM security reasoning on source code.
 
-1. Identify vulnerability type
-2. Identify vulnerable line number
-3. Explain the issue
-4. Suggest a fix
+## Project Overview
 
-The environment is deterministic, typed with Pydantic, and exposed through FastAPI.
+CodeSecurityAuditEnv is designed to benchmark how well LLMs can detect and remediate security vulnerabilities in realistic code snippets.
+
+Why this matters:
+
+- LLMs are increasingly used for code generation and code review.
+- Security reasoning quality is often inconsistent and hard to measure.
+- Existing evaluation setups usually focus on one-shot accuracy, not multi-step reasoning.
+
+Key idea:
+
+- Simulate real-world vulnerability analysis as a multi-step RL-style interaction.
+- Evaluate both vulnerability detection and remediation quality with deterministic scoring.
+
+## Key Features
+
+- Multi-step RL environment (`reset -> step -> state`)
+- 12 deterministic security tasks from easy to hard
+- Multi-vulnerability support in hard-tier scenarios
+- Deterministic grading and reproducible episodes
+- Strict vs tolerant evaluation modes
+- Non-saturating per-step metric (`final_score`, equivalent to avg-step reward)
+- Extensible vulnerability type system for new security categories
 
 ## Project Structure
 
@@ -38,11 +56,22 @@ project/
 
 ## Environment Design
 
-- Name: `CodeSecurityAuditEnv`
-- Core APIs:
-  - `reset() -> Observation`
-  - `step(action) -> (observation, reward, done, info)`
-  - `state() -> EnvState`
+High-level loop:
+
+- Agent proposes an action.
+- Environment validates and applies the action to the active task.
+- Grader computes deterministic reward and breakdown.
+- Environment returns next observation, reward, and termination signal.
+
+Pipeline:
+
+- `Agent -> Environment -> Grader -> Reward -> Next Step`
+
+Core APIs:
+
+- `reset() -> Observation`
+- `step(action) -> (observation, reward, done, info)`
+- `state() -> EnvState`
 
 ### Observation Model (Typed)
 
@@ -69,11 +98,23 @@ project/
 
 ## Tasks
 
-The dataset is deterministic and currently includes 12 Python security tasks across three difficulty levels:
+The benchmark currently contains 12 deterministic Python tasks:
 
-- Easy: SQL Injection, Hardcoded Secret
-- Medium: SSRF, Weak Hashing, CORS Misconfiguration, Command Injection, Path Traversal
-- Hard: Insecure Deserialization, OAuth Redirect Misvalidation + API Key Leakage, Prompt Injection + AI-Generated Insecure Code, Broken Authentication + Missing Rate Limiting, Sensitive Data Exposure + Insecure Debug Configuration
+- Easy: `2`
+- Medium: `5`
+- Hard: `5`
+
+Representative vulnerability categories include:
+
+- SQL Injection
+- SSRF
+- Command Injection
+- Path Traversal
+- Insecure Deserialization
+- Authentication flaws
+- Rate limiting failures
+- Sensitive data exposure
+- Prompt injection
 
 Each task uses canonical `vulnerabilities[]` ground truth with:
 
@@ -83,20 +124,16 @@ Each task uses canonical `vulnerabilities[]` ground truth with:
 - `severity` (`low|medium|high|critical`)
 - `accepted_fixes` and optional aliases
 
-Some hard tasks contain multiple vulnerabilities in a single episode.
+Real-world relevance:
 
-Newly added real-world scenarios include:
-
-- Command execution via unsanitized input (`medium_command_injection_01`)
-- File-serving path traversal (`medium_path_traversal_01`)
-- Authentication abuse without retry controls (`hard_broken_auth_rate_limit_01`)
-- Secret logging with production debug enabled (`hard_sensitive_data_logging_01`)
+- Tasks mirror production failure modes seen in APIs, authentication flows, logging, and LLM-integrated systems.
+- Hard tasks include multiple vulnerabilities in one episode to evaluate prioritization and multi-step handling.
 
 ## Reward Function
 
 Reward grading is deterministic and continuous, then clamped to `[0.0, 1.0]` per step.
 
-The grader uses weighted components:
+Reward components:
 
 - Vulnerability match quality (exact or related)
 - Line accuracy
@@ -104,15 +141,41 @@ The grader uses weighted components:
 - Fix quality (accepted-fix overlap + secure-pattern signal)
 - Response format quality
 
-The grader also applies deterministic penalties/adjustments for:
+Behavioral characteristics:
 
-- Wrong or low-signal responses
-- Repeated incorrect attempts
-- Missing critical unresolved issues
-- Difficulty-tier calibration (`easy|medium|hard`)
-- Optional strict-mode calibration
+- Partial credit for related but imperfect findings
+- Penalties for low-signal, irrelevant, or repeated incorrect attempts
+- Multi-step accumulation across the episode
+- Difficulty-aware calibration (`easy|medium|hard`)
 
 Episode progression is deterministic; scoring has no randomness.
+
+## Evaluation Methodology
+
+Primary metric:
+
+- `final_score = clamp(total_reward / num_steps, 0, 1)`
+
+Why this metric:
+
+- Prevents score saturation that occurs with clamped cumulative totals.
+- Preserves performance differences between strict and tolerant settings.
+- Reflects true per-step reasoning quality over the full episode.
+
+Evaluation modes:
+
+- Tolerant mode: training-friendly, more lenient grading.
+- Strict mode: leaderboard-style, stricter quality thresholds.
+
+## Example Output
+
+```text
+Task: hard_prompt_injection_chain_01
+final_score: 0.78 (strict)
+
+Average final_score (strict): 0.75
+Average final_score (tolerant): 0.88
+```
 
 ## FastAPI Endpoints
 
@@ -145,15 +208,22 @@ curl -X POST http://localhost:8000/step \
 curl http://localhost:8000/state
 ```
 
-## Local Setup
+## How To Run
 
-Python version:
+1. Clone repository:
+
+```bash
+git clone https://github.com/sxchin-01/code-security-audit-env.git
+cd code-security-audit-env
+```
+
+2. Install dependencies:
+
+Python version guidance:
 
 - Recommended: `Python 3.11`
 - Supported: `Python 3.10` to `Python 3.13`
 - `Python 3.14` may fail for some native dependencies (for example `pydantic-core`) depending on wheel availability.
-
-1. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -168,13 +238,12 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-2. Configure environment (secure API keys):
+3. Configure environment variables:
 
-Copy `.env.example` to `.env` and fill in your Hugging Face token:
+Copy `.env.example` to `.env` and set provider keys:
 
 ```bash
 cp .env.example .env
-# Edit .env and set your real HF_API_KEY
 ```
 
 Contents of `.env`:
@@ -193,45 +262,50 @@ GEMINI_MODEL=gemini-2.0-flash
 GEMINI_DEBUG_RESPONSE=0
 ```
 
-The `.env` file is automatically excluded from git (`see .gitignore`) so secrets are never committed.
-
-3. Run API server:
+4. Run API server:
 
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-4. Run baseline inference agent:
+5. Run evaluation script:
 
 ```bash
 python inference.py
 ```
 
-This will load your `.env` file automatically.
+This loads `.env` automatically and prints per-task plus average `final_score`.
 
-Evaluation output is reported as `final_score` only:
-
-- Per task: `final_score = clamp(total_reward / num_steps, 0, 1)`
-- Summary: `Average final_score`
-
-The script does not report cumulative score metrics.
-
-Optional: Override model at runtime (without modifying `.env`):
-
-```bash
-$env:LLM_PROVIDER="gemini"; $env:GEMINI_MODEL="gemini-2.0-flash"; $env:STRICT_MODE="1"; python inference.py
-```
-
-Set `STRICT_MODE=1` to enable stricter leaderboard-style grading during inference runs.
-
-To compare both modes with the same provider/model, run:
+Optional: run both modes for comparison:
 
 ```bash
 $env:STRICT_MODE="0"; python inference.py
 $env:STRICT_MODE="1"; python inference.py
 ```
 
+Optional: override provider/model at runtime:
+
+```bash
+$env:LLM_PROVIDER="gemini"; $env:GEMINI_MODEL="gemini-2.0-flash"; python inference.py
+```
+
 If using Hugging Face, ensure your token has permission to "Make calls to Inference Providers".
+
+## Future Work
+
+- Train RL agents directly on this environment rather than only using fixed policies.
+- Expand task coverage with additional modern vulnerability classes and language targets.
+- Integrate curated real-world vulnerability datasets and patch corpora.
+
+## Conclusion
+
+CodeSecurityAuditEnv provides a practical, reproducible benchmark for evaluating LLM security reasoning in realistic coding workflows.
+
+It is designed for:
+
+- Robustness: deterministic grading and stable task ordering
+- Reproducibility: no stochastic environment behavior
+- Extensibility: typed schemas and expandable vulnerability taxonomy
 
 ## Docker
 
