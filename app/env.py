@@ -6,11 +6,13 @@ from .grader import grade_action
 from .models import (
     Action,
     ActionHistoryItem,
+    Difficulty,
     EnvState,
     Observation,
     StepInfo,
     StepResult,
     TaskSpec,
+    VulnerabilityType,
 )
 from .tasks import get_all_tasks
 
@@ -19,8 +21,12 @@ from .tasks import get_all_tasks
 class EnvConfig:
     """Runtime configuration for deterministic episode handling."""
 
-    max_steps_per_episode: int = 2
+    max_steps_per_episode: int = 4
     include_history_in_observation: bool = True
+    strict_mode: bool = False
+    # Optional reward profile overrides keyed by difficulty, e.g.:
+    # {"hard": {"wrong_vulnerability_penalty": 1.25}}
+    difficulty_profile_overrides: dict[str, dict[str, float]] | None = None
 
 
 class CodeSecurityAuditEnv:
@@ -53,6 +59,48 @@ class CodeSecurityAuditEnv:
         self._history: list[ActionHistoryItem] = []
         self._last_observation: Observation | None = None
         self._total_reward: float = 0.0
+        self._addressed_vulnerability_ids: set[str] = set()
+        self._difficulty_profile_overrides = self._normalize_profile_overrides(
+            self._config.difficulty_profile_overrides
+        )
+
+    def _normalize_profile_overrides(
+        self,
+        raw: dict[str, dict[str, float]] | None,
+    ) -> dict[Difficulty, dict[str, float]]:
+        if not raw:
+            return {}
+
+        normalized: dict[Difficulty, dict[str, float]] = {}
+        for difficulty_key, values in raw.items():
+            try:
+                difficulty = Difficulty(difficulty_key)
+            except ValueError:
+                continue
+            if not isinstance(values, dict):
+                continue
+            sanitized = {k: float(v) for k, v in values.items() if isinstance(v, (int, float))}
+            if sanitized:
+                normalized[difficulty] = sanitized
+        return normalized
+
+    def _remaining_vulnerability_ids(self) -> list[str]:
+        if self._current_task is None:
+            return []
+        remaining = [
+            vuln.vuln_id
+            for vuln in self._current_task.vulnerabilities
+            if vuln.vuln_id not in self._addressed_vulnerability_ids
+        ]
+        return remaining
+
+    def _next_expected_vulnerability(self) -> tuple[VulnerabilityType | None, int | None]:
+        if self._current_task is None:
+            return (None, None)
+        for vuln in self._current_task.vulnerabilities:
+            if vuln.vuln_id not in self._addressed_vulnerability_ids:
+                return (vuln.type, vuln.line)
+        return (None, None)
 
     def _build_observation(self) -> Observation:
         if self._current_task is None:
@@ -79,6 +127,7 @@ class CodeSecurityAuditEnv:
         self._done = False
         self._history = []
         self._total_reward = 0.0
+        self._addressed_vulnerability_ids = set()
 
         self._last_observation = self._build_observation()
         return self._last_observation
@@ -93,7 +142,17 @@ class CodeSecurityAuditEnv:
             raise RuntimeError("Episode is not active. Call reset() before step().")
 
         self._step_count += 1
-        grade = grade_action(action, self._current_task)
+        grade = grade_action(
+            action,
+            self._current_task,
+            addressed_ids=set(self._addressed_vulnerability_ids),
+            attempt_index=self._step_count,
+            profile_overrides=self._difficulty_profile_overrides,
+            strict_mode=self._config.strict_mode,
+        )
+
+        if grade.newly_addressed and grade.matched_vulnerability_id:
+            self._addressed_vulnerability_ids.add(grade.matched_vulnerability_id)
 
         self._total_reward += grade.reward
         self._history.append(
@@ -108,23 +167,28 @@ class CodeSecurityAuditEnv:
         )
 
         reached_max_steps = self._step_count >= self._config.max_steps_per_episode
-        # If the agent submits a concrete fix, we consider the audit cycle complete.
-        is_terminal_action = action.action_type.value == "suggest_fix"
-        self._done = bool(reached_max_steps or is_terminal_action)
+        remaining_ids = self._remaining_vulnerability_ids()
+        all_addressed = len(remaining_ids) == 0
+        self._done = bool(reached_max_steps or all_addressed)
 
         done_reason = (
-            "terminal_action"
-            if is_terminal_action
+            "all_vulnerabilities_addressed"
+            if all_addressed
             else "max_steps_reached"
             if reached_max_steps
             else grade.done_reason
         )
 
         self._last_observation = self._build_observation()
+        expected_vuln_value, expected_line = self._next_expected_vulnerability()
         info_model = StepInfo(
             score_breakdown=grade.breakdown,
-            expected_vulnerability=self._current_task.vulnerability_type,
-            expected_line=self._current_task.vulnerable_line,
+            expected_vulnerability=expected_vuln_value,
+            expected_line=expected_line,
+            matched_vulnerability=grade.matched_vulnerability_id,
+            newly_addressed=grade.newly_addressed,
+            addressed_vulnerabilities=sorted(self._addressed_vulnerability_ids),
+            remaining_vulnerabilities=remaining_ids,
             done_reason=done_reason,
         )
         result = StepResult(
@@ -151,5 +215,8 @@ class CodeSecurityAuditEnv:
             last_observation=self._last_observation,
             total_reward=round(self._total_reward, 4),
             done=self._done,
+            step_count=self._step_count,
+            addressed_vulnerabilities=sorted(self._addressed_vulnerability_ids),
+            remaining_vulnerabilities=self._remaining_vulnerability_ids(),
             history=list(self._history),
         )

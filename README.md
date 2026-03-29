@@ -29,7 +29,7 @@ project/
 |   |-- models.py      # Pydantic schemas
 |   |-- tasks.py       # Deterministic task dataset
 |   |-- grader.py      # Deterministic reward grading
-|-- inference.py       # Baseline OpenAI agent loop
+|-- inference.py       # Baseline LLM agent loop (HF or Gemini)
 |-- openenv.yaml       # OpenEnv metadata
 |-- requirements.txt
 |-- Dockerfile
@@ -55,39 +55,52 @@ project/
 
 ### Action Model (Typed)
 
-- `action_type: report_vulnerability | suggest_fix`
+- `action_type: report_vulnerability | suggest_fix | no_vulnerability`
 - `vulnerability_type: SQL Injection | XSS | Hardcoded Secret | ... | None`
+- `vulnerability_label: str | None`
 - `line_number: int`
 - `explanation: str`
 - `fix: str`
 
 ## Tasks
 
-The dataset includes multiple vulnerabilities across three difficulty levels:
+The dataset is deterministic and currently includes 8 Python security tasks across three difficulty levels:
 
 - Easy: SQL Injection, Hardcoded Secret
-- Medium: Improper Validation, Weak Hashing
-- Hard: SSRF, Insecure Deserialization
+- Medium: SSRF, Weak Hashing, CORS Misconfiguration
+- Hard: Insecure Deserialization, OAuth Redirect Misvalidation + API Key Leakage, Prompt Injection + AI-Generated Insecure Code
 
-All tasks have explicit ground truth (`vulnerability_type`, `vulnerable_line`, `expected_fix`) for deterministic scoring.
+Each task uses canonical `vulnerabilities[]` ground truth with:
+
+- `vuln_id`
+- `type`
+- `line`
+- `severity` (`low|medium|high|critical`)
+- `accepted_fixes` and optional aliases
+
+Some hard tasks contain multiple vulnerabilities in a single episode.
 
 ## Reward Function
 
-Reward is continuous and clamped to `[0.0, 1.0]`.
+Reward grading is deterministic and continuous, then clamped to `[0.0, 1.0]` per step.
 
-Base shaping:
+The grader uses weighted components:
 
-- Correct vulnerability: `+0.4`
-- Correct line: `+0.2` (or `+0.1` if off-by-one)
-- Explanation quality: up to `+0.2`
-- Fix quality: up to `+0.2`
+- Vulnerability match quality (exact or related)
+- Line accuracy
+- Explanation quality (keyword + causality signal)
+- Fix quality (accepted-fix overlap + secure-pattern signal)
+- Response format quality
 
-Penalties:
+The grader also applies deterministic penalties/adjustments for:
 
-- Wrong vulnerability: `-0.3`
-- Irrelevant/empty action: up to `-0.2`
+- Wrong or low-signal responses
+- Repeated incorrect attempts
+- Missing critical unresolved issues
+- Difficulty-tier calibration (`easy|medium|hard`)
+- Optional strict-mode calibration
 
-Scoring is deterministic (no randomness).
+Episode progression is deterministic; scoring has no randomness.
 
 ## FastAPI Endpoints
 
@@ -154,9 +167,18 @@ cp .env.example .env
 
 Contents of `.env`:
 ```
+LLM_PROVIDER=gemini
+STRICT_MODE=0
+
+# For Hugging Face (LLM_PROVIDER=hf)
 HF_API_KEY=hf_your_token_here
 HF_MODEL=deepseek-ai/DeepSeek-R1:fastest
 HF_DEBUG_RESPONSE=0
+
+# For Gemini (LLM_PROVIDER=gemini)
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.0-flash
+GEMINI_DEBUG_RESPONSE=0
 ```
 
 The `.env` file is automatically excluded from git (`see .gitignore`) so secrets are never committed.
@@ -175,13 +197,29 @@ python inference.py
 
 This will load your `.env` file automatically.
 
+Evaluation output is reported as `final_score` only:
+
+- Per task: `final_score = clamp(total_reward / num_steps, 0, 1)`
+- Summary: `Average final_score`
+
+The script does not report cumulative score metrics.
+
 Optional: Override model at runtime (without modifying `.env`):
 
 ```bash
-$env:HF_MODEL="openai/gpt-oss-120b:fastest"; python inference.py
+$env:LLM_PROVIDER="gemini"; $env:GEMINI_MODEL="gemini-2.0-flash"; $env:STRICT_MODE="1"; python inference.py
 ```
 
-Note: If your token is fine-grained, ensure it has permission to "Make calls to Inference Providers".
+Set `STRICT_MODE=1` to enable stricter leaderboard-style grading during inference runs.
+
+To compare both modes with the same provider/model, run:
+
+```bash
+$env:STRICT_MODE="0"; python inference.py
+$env:STRICT_MODE="1"; python inference.py
+```
+
+If using Hugging Face, ensure your token has permission to "Make calls to Inference Providers".
 
 ## Docker
 
