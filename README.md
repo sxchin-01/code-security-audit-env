@@ -1,6 +1,6 @@
 ---
 title: CodeSecurityAuditEnv
-emoji: 🛡️
+emoji: shield
 colorFrom: blue
 colorTo: green
 sdk: docker
