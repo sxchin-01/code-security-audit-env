@@ -302,14 +302,17 @@ curl -X POST $BASE_URL/step \
 
 - Rewards are generated deterministically by rule-based grading.
 - Step output includes a detailed `info.score_breakdown` structure.
-- Episode-level evaluation can be summarized with `final_score` in baseline runs.
+- Each step reward is bounded to `[0, 1]` by the grader.
+- Episode-level evaluation is summarized with `final_score` in baseline runs.
 - `STRICT_MODE` controls stricter evaluation behavior for more conservative scoring.
 
 Baseline summary metric:
 
 ```text
-final_score = clamp(total_reward / num_steps, 0, 1)
+final_score = average(step_rewards), then bounded to [0, 1]
 ```
+
+Note: this is a per-step average metric, not a cumulative-sum metric.
 
 ---
 
