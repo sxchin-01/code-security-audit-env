@@ -5,11 +5,11 @@ description: >
 version: 1.0.0
 entrypoint:
   type: fastapi
-  module: app.main
+  module: main
   app: app
 api:
   reset:
-    method: POST
+    method: GET
     path: /reset
   step:
     method: POST
