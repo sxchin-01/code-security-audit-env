@@ -10,6 +10,22 @@ pinned: false
 
 # CodeSecurityAuditEnv
 
+Deterministic RL-style security auditing environment with a typed FastAPI interface.
+
+## 🧭 Quick Navigation
+
+- [Overview](#-overview)
+- [Key Features](#-key-features)
+- [System Architecture](#-system-architecture)
+- [Project Structure](#-project-structure)
+- [How It Works](#-how-it-works)
+- [Setup Instructions](#-setup-instructions)
+- [API Reference](#-api-reference)
+- [Environment Variables](#-environment-variables)
+- [Example Usage](#-example-usage)
+- [Evaluation / Scoring](#-evaluation--scoring)
+- [Conclusion](#-conclusion)
+
 ## 📘 Overview
 
 CodeSecurityAuditEnv is a deterministic RL-style benchmark for code security auditing. It evaluates how an agent identifies vulnerabilities in source code, explains risk, and proposes remediation through iterative environment interaction.
@@ -81,6 +97,11 @@ This loop enables controlled benchmarking of multi-step security reasoning.
 
 ## ⚙️ Setup Instructions
 
+### Prerequisites
+
+- Python 3.11+ recommended
+- Docker (optional, for containerized runs)
+
 ### Local Setup
 
 1. Create and activate a virtual environment.
@@ -94,6 +115,12 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 7860
 ```
 
+Local API base URL:
+
+```text
+http://localhost:7860
+```
+
 ### Docker Setup
 
 1. Build the image.
@@ -102,6 +129,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 7860
 ```bash
 docker build -t code-security-env .
 docker run --rm -p 7860:7860 code-security-env
+```
+
+Docker API base URL:
+
+```text
+http://localhost:7860
 ```
 
 ---
@@ -116,6 +149,8 @@ docker run --rm -p 7860:7860 code-security-env
 | GET | `/reset` | Starts new episode and returns observation |
 | POST | `/step` | Applies one action and returns transition result |
 | GET | `/health` | Health check endpoint |
+
+All API requests and responses use JSON. For `POST /step`, use `Content-Type: application/json`.
 
 ### `GET /`
 
@@ -171,6 +206,16 @@ curl -X POST http://localhost:7860/step \
   }'
 ```
 
+- Minimum accepted payload fields:
+
+```json
+{
+  "action_type": "report_vulnerability",
+  "vulnerability_type": "SQL Injection",
+  "line": 1
+}
+```
+
 - Example response (simplified):
 
 ```json
@@ -208,6 +253,12 @@ curl -X GET http://localhost:7860/health
 | `HF_TOKEN` | Hugging Face token for authenticated API calls. |
 | `STRICT_MODE` | `0` for tolerant mode, `1` for strict mode. |
 
+Configuration behavior:
+
+- If `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` are set, inference can run in API mode.
+- If they are not set, the baseline uses deterministic mock behavior.
+- Keep `HF_TOKEN` out of git-tracked files; prefer local environment or secret management.
+
 Example:
 
 ```env
@@ -221,16 +272,22 @@ STRICT_MODE=0
 
 ## 🧪 Example Usage
 
+Set a reusable base URL:
+
+```bash
+BASE_URL=http://localhost:7860
+```
+
 ### Reset an episode
 
 ```bash
-curl -X GET http://localhost:7860/reset
+curl -X GET $BASE_URL/reset
 ```
 
 ### Submit one step action
 
 ```bash
-curl -X POST http://localhost:7860/step \
+curl -X POST $BASE_URL/step \
   -H "Content-Type: application/json" \
   -d '{
     "action_type": "report_vulnerability",
@@ -248,6 +305,12 @@ curl -X POST http://localhost:7860/step \
 - Episode-level evaluation can be summarized with `final_score` in baseline runs.
 - `STRICT_MODE` controls stricter evaluation behavior for more conservative scoring.
 
+Baseline summary metric:
+
+```text
+final_score = clamp(total_reward / num_steps, 0, 1)
+```
+
 ---
 
 ## ✅ Conclusion
@@ -255,3 +318,5 @@ curl -X POST http://localhost:7860/step \
 CodeSecurityAuditEnv provides a deterministic, API-first benchmark for evaluating multi-step security reasoning over code.
 
 With typed interfaces, reproducible scoring, and container-ready deployment, it can be used consistently across local testing, automated evaluation workflows, and hosted runtime environments.
+
+For deployment verification, confirm `GET /`, `GET /reset`, `POST /step`, and `GET /health` return expected responses after each release.
