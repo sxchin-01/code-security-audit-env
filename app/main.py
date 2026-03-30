@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI, HTTPException
 
 from .env import CodeSecurityAuditEnv
-from .models import Action, ResetResponse, StateResponse, StepRequest
+from .models import Action, ResetResponse, StateResponse
 
 app = FastAPI(
     title="CodeSecurityAuditEnv API",
@@ -21,7 +23,7 @@ def root() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/reset", response_model=ResetResponse)
+@app.get("/reset", response_model=ResetResponse)
 def reset_env() -> ResetResponse:
     """Start a new episode and return the initial observation."""
 
@@ -30,16 +32,34 @@ def reset_env() -> ResetResponse:
 
 
 @app.post("/step")
-def step_env(payload: StepRequest) -> dict:
+def step_env(payload: dict[str, Any]) -> dict:
     """Apply one action and return (observation, reward, done, info)."""
 
+    action_payload = payload.get("action") if isinstance(payload.get("action"), dict) else payload
+    if not isinstance(action_payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid action payload: expected JSON object")
+
+    adapted_payload = {
+        "action_type": action_payload.get("action_type"),
+        "vulnerability_type": action_payload.get("vulnerability_type"),
+        "line_number": action_payload.get("line_number", action_payload.get("line")),
+        "explanation": action_payload.get("explanation", ""),
+        "fix": action_payload.get("fix", ""),
+    }
+
     try:
-        observation, reward, done, info = env.step(payload.action)
+        action = Action.model_validate(adapted_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid action payload: {exc}") from exc
+
+    try:
+        observation, reward, done, info = env.step(action)
+        observation_dump = observation.model_dump()
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {
-        "observation": observation.model_dump(),
+        "observation": observation_dump,
         "reward": reward,
         "done": done,
         "info": info,
