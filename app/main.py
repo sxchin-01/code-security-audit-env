@@ -14,6 +14,13 @@ app = FastAPI(
 env = CodeSecurityAuditEnv()
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    """Basic liveness endpoint for container platforms and browser checks."""
+
+    return {"status": "ok"}
+
+
 @app.post("/reset", response_model=ResetResponse)
 def reset_env() -> ResetResponse:
     """Start a new episode and return the initial observation."""
