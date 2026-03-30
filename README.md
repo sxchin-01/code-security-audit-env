@@ -377,3 +377,5 @@ This repository is compatible with Spaces Docker runtime for batch-style benchma
 - Reset progression is deterministic.
 - Reward computation has no stochastic elements.
 - Baseline uses `temperature=0` for consistent model behavior.
+
+# rebuild trigger
