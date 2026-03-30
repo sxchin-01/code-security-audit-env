@@ -13,7 +13,7 @@ COPY --chown=user requirements.txt requirements.txt
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # Copy rest of the app
-COPY --chown=user . /app
+COPY --chown=user . .
 
 # Expose correct port
 EXPOSE 7860
