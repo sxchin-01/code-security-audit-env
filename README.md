@@ -208,6 +208,34 @@ curl -X POST http://localhost:8000/step \
 curl http://localhost:8000/state
 ```
 
+## Hugging Face Spaces API Interface
+
+For Spaces-style API deployment, a lightweight root entrypoint is available in `app.py`.
+
+Run it with:
+
+```bash
+uvicorn app:app --host 0.0.0.0 --port 7860
+```
+
+Endpoints exposed by this interface:
+
+- `GET /` -> health check (`{"status":"ok"}`)
+- `GET /reset` -> returns a new typed observation payload
+- `POST /step` -> accepts an action JSON and returns `observation`, `reward`, `done`, and `info`
+
+Example `POST /step` payload:
+
+```json
+{
+  "action_type": "report_vulnerability",
+  "vulnerability_type": "SQL Injection",
+  "line_number": 7,
+  "explanation": "User input is concatenated into SQL.",
+  "fix": "Use parameterized queries."
+}
+```
+
 ## How To Run
 
 1. Clone repository:
