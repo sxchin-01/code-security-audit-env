@@ -2,13 +2,17 @@
 name = "code-security-audit-env"
 version = "1.0.0"
 description = "OpenEnv-compatible RL environment for code security auditing"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 dependencies = [
     "fastapi",
     "uvicorn",
-    "pydantic"
+    "pydantic",
+    "openenv-core[core]>=0.2.0"
 ]
+
+[project.scripts]
+server = "app.main:app"
 
 [build-system]
 requires = ["setuptools"]
