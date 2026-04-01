@@ -9,7 +9,7 @@ entrypoint:
   app: app
 api:
   reset:
-    method: GET
+    method: POST
     path: /reset
   reset_post:
     method: POST
