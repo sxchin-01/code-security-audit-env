@@ -23,7 +23,7 @@ def root() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/reset", response_model=ResetResponse)
+@app.api_route("/reset", methods=["GET", "POST"], response_model=ResetResponse)
 def reset_env() -> ResetResponse:
     """Start a new episode and return the initial observation."""
 
