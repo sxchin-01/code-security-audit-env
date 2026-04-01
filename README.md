@@ -10,21 +10,29 @@ pinned: false
 
 # CodeSecurityAuditEnv
 
-Deterministic RL-style security auditing environment with a typed FastAPI interface.
+**CodeSecurityAuditEnv** is an **OpenEnv-compatible RL environment** for deterministic security-auditing evaluation over source code.
+
+It solves a practical problem: measuring whether an agent can **consistently detect vulnerabilities, explain risk, and propose actionable fixes** with reproducible scoring and API-driven workflows.
 
 ## 🧭 Quick Navigation
 
 - [Overview](#-overview)
+- [Why This Matters](#-why-this-matters)
 - [Key Features](#-key-features)
-- [System Architecture](#-system-architecture)
+- [Architecture](#-architecture)
 - [Project Structure](#-project-structure)
-- [How It Works](#-how-it-works)
-- [Setup Instructions](#-setup-instructions)
-- [API Reference](#-api-reference)
+- [RL Loop](#-rl-loop)
+- [Task Design](#-task-design)
+- [API Endpoints](#-api-endpoints)
 - [Environment Variables](#-environment-variables)
 - [Example Usage](#-example-usage)
-- [Evaluation / Scoring](#-evaluation--scoring)
+- [Evaluation / Results](#-evaluation--results)
+- [Deployment](#-deployment)
+- [OpenEnv Compliance](#-openenv-compliance)
+- [Setup Instructions](#-setup-instructions)
 - [Conclusion](#-conclusion)
+
+---
 
 ## 📘 Overview
 
@@ -38,28 +46,44 @@ This repository is suitable for benchmarking and integration testing where stabl
 
 ---
 
-## ✅ Key Features
+## 🎯 Why This Matters
 
-- Deterministic multi-step environment lifecycle (`reset -> step -> state`)
-- FastAPI API layer with typed schema validation
-- Reproducible scoring behavior (no randomness in grading)
-- Task coverage across easy, medium, and hard vulnerabilities
-- Strict mode toggle for tighter evaluation thresholds
-- Docker-ready deployment for local and hosted execution
+- **Secure code auditing is high impact**: modern software stacks rely on fast review cycles where missed vulnerabilities can propagate quickly.
+- **LLM evaluation needs rigor**: one-shot demos are insufficient for security; iterative, stateful evaluation reveals real reasoning quality.
+- **Reproducibility is essential**: deterministic tasks and scoring allow fair comparisons between models, prompts, and agent policies.
 
 ---
 
-## 🏗️ System Architecture
+## ✅ Key Features
 
-High-level component flow:
+- **Deterministic multi-step environment lifecycle** (`reset -> step -> state`)
+- **FastAPI API layer** with typed schema validation
+- **Reproducible scoring behavior** (no randomness in grading)
+- **Task coverage** across easy, medium, and hard vulnerabilities
+- **Strict mode toggle** for tighter evaluation thresholds
+- **Docker-ready deployment** for local and hosted execution
+- **OpenEnv-compatible metadata** via `openenv.yaml`
 
-1. `API Layer` (`app/main.py`) receives agent requests.
-2. `Environment` (`app/env.py`) manages task state, progression, and termination.
-3. `Grader` (`app/grader.py`) computes deterministic reward and score breakdown.
-4. `Task Store` (`app/tasks.py`) provides canonical vulnerability scenarios.
-5. `Models` (`app/models.py`) enforce schema consistency across actions and observations.
+---
+
+## 🏗️ Architecture
+
+### High-level Components
+
+1. **API Layer** (`app/main.py`) receives agent requests.
+2. **Environment** (`app/env.py`) manages task state, progression, and termination.
+3. **Grader** (`app/grader.py`) computes deterministic reward and score breakdown.
+4. **Task Store** (`app/tasks.py`) provides canonical vulnerability scenarios.
+5. **Models** (`app/models.py`) enforce schema consistency across actions and observations.
+6. **Inference Runner** (`inference.py`) executes full benchmark runs in mock or API mode.
 
 At runtime, `/reset` initializes an episode and `/step` applies one action, returning `observation`, `reward`, `done`, and `info` for the next decision.
+
+### Architecture Diagram
+
+![Architecture](./assets/architecture.png)
+
+_If `assets/architecture.png` is not present, add a project-specific architecture image at this path._
 
 ---
 
@@ -82,64 +106,41 @@ project/
 
 ---
 
-## 🔄 How It Works
+## 🔄 RL Loop
 
-1. Start the API server.
-2. Call `GET /reset` to load the next deterministic task and receive initial observation.
-3. Submit an action via `POST /step`.
-4. Environment validates and applies the action.
-5. Grader returns deterministic reward and metadata.
-6. Repeat `POST /step` until `done=true`.
+The interaction cycle is intentionally simple and deterministic:
 
-This loop enables controlled benchmarking of multi-step security reasoning.
+1. **`reset` -> observation**
+   - Client calls `/reset`.
+   - Environment loads the next deterministic task and returns an initial observation.
+2. **`step(action)` -> transition**
+   - Client submits an action to `/step`.
+   - Environment validates and applies action semantics.
+3. **deterministic grading**
+   - Grader computes reward and detailed score breakdown.
+   - Response returns `observation`, `reward`, `done`, and `info`.
 
----
+Repeat step actions until `done=true`.
 
-## ⚙️ Setup Instructions
+### RL Flow Diagram
 
-### Prerequisites
+![RL Loop](./assets/rl-loop.png)
 
-- Python 3.11+ recommended
-- Docker (optional, for containerized runs)
-
-### Local Setup
-
-1. Create and activate a virtual environment.
-2. Install dependencies.
-3. Run the API server.
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 7860
-```
-
-Local API base URL:
-
-```text
-http://localhost:7860
-```
-
-### Docker Setup
-
-1. Build the image.
-2. Run the container.
-
-```bash
-docker build -t code-security-env .
-docker run --rm -p 7860:7860 code-security-env
-```
-
-Docker API base URL:
-
-```text
-http://localhost:7860
-```
+_If `assets/rl-loop.png` is not present, add a project-specific RL flow image at this path._
 
 ---
 
-## 🔌 API Reference
+## 🧩 Task Design
+
+- Tasks represent realistic security review scenarios over code snippets.
+- Difficulty spans **easy**, **medium**, and **hard**.
+- Ground truth vulnerabilities are defined in a canonical, deterministic task store.
+- The environment advances deterministically across tasks for reproducible benchmarks.
+- Output history captures previous actions to support iterative reasoning evaluation.
+
+---
+
+## 🔌 API Endpoints
 
 ### Endpoint Summary
 
@@ -154,14 +155,14 @@ All API requests and responses use JSON. For `POST /step`, use `Content-Type: ap
 
 ### `GET /`
 
-- Description: Returns service status.
-- Example request:
+- **Description:** Returns service status.
+- **Example request:**
 
 ```bash
 curl -X GET http://localhost:7860/
 ```
 
-- Example response:
+- **Example response:**
 
 ```json
 {"status":"ok"}
@@ -169,14 +170,14 @@ curl -X GET http://localhost:7860/
 
 ### `GET /reset`
 
-- Description: Starts a new episode and returns the initial observation.
-- Example request:
+- **Description:** Starts a new episode and returns the initial observation.
+- **Example request:**
 
 ```bash
 curl -X GET http://localhost:7860/reset
 ```
 
-- Example response (simplified):
+- **Example response (simplified):**
 
 ```json
 {
@@ -193,8 +194,8 @@ curl -X GET http://localhost:7860/reset
 
 ### `POST /step`
 
-- Description: Applies an action and returns transition data.
-- Example request:
+- **Description:** Applies an action and returns transition data.
+- **Example request:**
 
 ```bash
 curl -X POST http://localhost:7860/step \
@@ -206,7 +207,7 @@ curl -X POST http://localhost:7860/step \
   }'
 ```
 
-- Minimum accepted payload fields:
+- **Minimum accepted payload fields:**
 
 ```json
 {
@@ -216,7 +217,7 @@ curl -X POST http://localhost:7860/step \
 }
 ```
 
-- Example response (simplified):
+- **Example response (simplified):**
 
 ```json
 {
@@ -229,14 +230,14 @@ curl -X POST http://localhost:7860/step \
 
 ### `GET /health`
 
-- Description: Returns health status.
-- Example request:
+- **Description:** Returns health status.
+- **Example request:**
 
 ```bash
 curl -X GET http://localhost:7860/health
 ```
 
-- Example response:
+- **Example response:**
 
 ```json
 {"status":"ok"}
@@ -298,7 +299,7 @@ curl -X POST $BASE_URL/step \
 
 ---
 
-## 📈 Evaluation / Scoring
+## 📈 Evaluation / Results
 
 - Rewards are generated deterministically by rule-based grading.
 - Step output includes a detailed `info.score_breakdown` structure.
@@ -313,6 +314,84 @@ final_score = average(step_rewards), then bounded to [0, 1]
 ```
 
 Note: this is a per-step average metric, not a cumulative-sum metric.
+
+---
+
+## 🚀 Deployment
+
+### Local API deployment
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 7860
+```
+
+### Docker deployment
+
+```bash
+docker build -t code-security-env .
+docker run --rm -p 7860:7860 code-security-env
+```
+
+### Hugging Face Space deployment
+
+- Repository is configured for Hugging Face **Docker Space** hosting.
+- Runtime metadata is defined in `openenv.yaml`.
+- Live host format: `https://<owner>-<space-name>.hf.space`
+
+---
+
+## 🧾 OpenEnv Compliance
+
+This project includes OpenEnv metadata and API behavior aligned for validator compatibility:
+
+- `openenv.yaml` defines OpenEnv-compatible entrypoint and API contract.
+- `/reset` supports **GET** and **POST** for validator/tooling compatibility.
+- `/step` supports deterministic action evaluation with typed output fields.
+- Deployment settings define Docker runtime and port configuration.
+
+---
+
+## ⚙️ Setup Instructions
+
+### Prerequisites
+
+- Python 3.11+ recommended
+- Docker (optional, for containerized runs)
+
+### Local Setup
+
+1. Create and activate a virtual environment.
+2. Install dependencies.
+3. Run the API server.
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 7860
+```
+
+Local API base URL:
+
+```text
+http://localhost:7860
+```
+
+### Docker Setup
+
+1. Build the image.
+2. Run the container.
+
+```bash
+docker build -t code-security-env .
+docker run --rm -p 7860:7860 code-security-env
+```
+
+Docker API base URL:
+
+```text
+http://localhost:7860
+```
 
 ---
 
