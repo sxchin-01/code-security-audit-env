@@ -322,6 +322,9 @@ Note: this is a per-step average metric, not a cumulative-sum metric.
 ### Local API deployment
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 7860
 ```
 
