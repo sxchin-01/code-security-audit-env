@@ -374,6 +374,8 @@ def run_baseline(*, strict_mode: bool = False) -> None:
         episode_reward = 0.0
         step_index = 0
 
+        print(f"[START] task={observation.task_id}", flush=True)
+
         while not done:
             step_index += 1
             if api_enabled and api_base and model_name and hf_token:
@@ -392,6 +394,12 @@ def run_baseline(*, strict_mode: bool = False) -> None:
             episode_reward += reward
 
             print(
+                f"[STEP] task={observation.task_id} step={step_index} "
+                f"reward={reward:.4f}",
+                flush=True,
+            )
+
+            print(
                 f"[task {idx + 1}/{task_count}] step={step_index} "
                 f"reward={reward:.4f} done={done} reason={info.get('done_reason')}"
             )
@@ -401,6 +409,12 @@ def run_baseline(*, strict_mode: bool = False) -> None:
         final_task_score = episode_reward / num_steps
         final_task_score = max(0.0, min(1.0, final_task_score))
         final_scores.append(final_task_score)
+
+        print(
+            f"[END] task={observation.task_id} score={final_task_score:.4f} "
+            f"steps={num_steps}",
+            flush=True,
+        )
 
         print(
             f"[task {idx + 1}/{task_count}] task_id={observation.task_id} "
