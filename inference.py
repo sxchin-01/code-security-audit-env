@@ -347,10 +347,14 @@ def run_baseline(*, strict_mode: bool = False) -> None:
 
     # Environment-driven API configuration.
     api_base = os.environ.get("API_BASE_URL")
-    model_name = os.environ.get("MODEL_NAME")
+    model_name = (
+        os.environ.get("MODEL_NAME")
+        or os.environ.get("OPENAI_MODEL")
+        or "gpt-4o-mini"
+    )
     api_key = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN")
 
-    api_enabled = bool(api_base and model_name and api_key)
+    api_enabled = bool(api_base and api_key)
     if api_key:
         lowered = api_key.lower()
         if "your_" in lowered or "replace" in lowered or "token_here" in lowered:
@@ -378,7 +382,7 @@ def run_baseline(*, strict_mode: bool = False) -> None:
 
         while not done:
             step_index += 1
-            if api_enabled and api_base and model_name and api_key:
+            if api_enabled and api_base and api_key:
                 try:
                     action = _action_from_llm(
                         api_base=api_base,
