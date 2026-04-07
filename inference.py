@@ -275,6 +275,12 @@ def _fallback_action_from_text(text: str) -> Action:
     )
 
 
+def _strict_open_unit_interval(value: float) -> float:
+    """Clamp a float strictly inside (0, 1) for validator-safe score output."""
+
+    return max(0.0001, min(0.9999, value))
+
+
 def _mock_action(env: CodeSecurityAuditEnv, step_idx: int) -> Action:
     """Deterministic local policy used when API env config is missing."""
 
@@ -396,10 +402,11 @@ def run_baseline(*, strict_mode: bool = False) -> None:
                 action = _mock_action(env, step_index)
             observation, reward, done, info = env.step(action)
             episode_reward += reward
+            marker_reward = _strict_open_unit_interval(reward)
 
             print(
                 f"[STEP] task={observation.task_id} step={step_index} "
-                f"reward={reward:.4f}",
+                f"reward={marker_reward:.4f}",
                 flush=True,
             )
 
@@ -412,7 +419,7 @@ def run_baseline(*, strict_mode: bool = False) -> None:
         num_steps = max(step_index, 1)
         final_task_score = episode_reward / num_steps
         # Validator requires strict bounds: score must be in (0, 1), not equal to endpoints.
-        final_task_score = max(0.0001, min(0.9999, final_task_score))
+        final_task_score = _strict_open_unit_interval(final_task_score)
         final_scores.append(final_task_score)
 
         print(
