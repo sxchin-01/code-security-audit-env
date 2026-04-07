@@ -89,12 +89,12 @@ def _extract_text_from_content(content: Any) -> str:
     return ""
 
 
-def _call_hf_inference(*, api_base: str, hf_token: str, model_name: str, prompt: str) -> str:
+def _call_hf_inference(*, api_base: str, api_key: str, model_name: str, prompt: str) -> str:
     """Call OpenAI-compatible chat completion API using environment-driven settings."""
 
     client = OpenAI(
         base_url=api_base,
-        api_key=hf_token,
+        api_key=api_key,
     )
 
     try:
@@ -319,7 +319,7 @@ def _action_from_llm(
     *,
     api_base: str,
     model_name: str,
-    hf_token: str,
+    api_key: str,
     observation: Observation,
 ) -> Action:
     user_prompt = _build_user_prompt(observation)
@@ -328,7 +328,7 @@ def _action_from_llm(
     generated = _call_hf_inference(
         api_base=api_base,
         model_name=model_name,
-        hf_token=hf_token,
+        api_key=api_key,
         prompt=full_prompt,
     )
 
@@ -348,11 +348,11 @@ def run_baseline(*, strict_mode: bool = False) -> None:
     # Environment-driven API configuration.
     api_base = os.environ.get("API_BASE_URL")
     model_name = os.environ.get("MODEL_NAME")
-    hf_token = os.environ.get("HF_TOKEN")
+    api_key = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN")
 
-    api_enabled = bool(api_base and model_name and hf_token)
-    if hf_token:
-        lowered = hf_token.lower()
+    api_enabled = bool(api_base and model_name and api_key)
+    if api_key:
+        lowered = api_key.lower()
         if "your_" in lowered or "replace" in lowered or "token_here" in lowered:
             api_enabled = False
 
@@ -378,12 +378,12 @@ def run_baseline(*, strict_mode: bool = False) -> None:
 
         while not done:
             step_index += 1
-            if api_enabled and api_base and model_name and hf_token:
+            if api_enabled and api_base and model_name and api_key:
                 try:
                     action = _action_from_llm(
                         api_base=api_base,
                         model_name=model_name,
-                        hf_token=hf_token,
+                        api_key=api_key,
                         observation=observation,
                     )
                 except RuntimeError as exc:
