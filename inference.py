@@ -411,7 +411,8 @@ def run_baseline(*, strict_mode: bool = False) -> None:
         # Primary metric: average per-step reward (prevents multi-step saturation).
         num_steps = max(step_index, 1)
         final_task_score = episode_reward / num_steps
-        final_task_score = max(0.0, min(1.0, final_task_score))
+        # Validator requires strict bounds: score must be in (0, 1), not equal to endpoints.
+        final_task_score = max(0.0001, min(0.9999, final_task_score))
         final_scores.append(final_task_score)
 
         print(
